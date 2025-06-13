@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Forkie Runner</title>
+    <!-- Import Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+    <!-- Import Tone.js for sound effects -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
+    <style>
+        :root {
+            --bg-color: #f7f7f7;
+            --text-color: #535353;
+            --line-color: #333333;
+            --accent-color: #e91e63;
+        }
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'VT323', monospace;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            touch-action: none; /* Disable double-tap zoom on mobile */
+        }
+        .container {
+            width: 100%;
+            max-width: 800px;
+            text-align: center;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        h1 {
+            font-family: 'Press Start 2P', cursive;
+            font-size: 2.5rem;
+            color: var(--line-color);
+            margin-bottom: 20px;
+        }
+        canvas {
+            background-color: var(--bg-color);
+            display: block;
+            margin: 0 auto;
+            border-bottom: 2px solid var(--line-color);
+        }
+        .credits {
+            margin-top: 20px;
+            font-size: 1rem;
+            color: #888;
+            line-height: 1.5;
+        }
+        .credits a {
+            color: var(--accent-color);
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Forkie Runner</h1>
+        <canvas id="gameCanvas"></canvas>
+        <div class="credits">
+            <p>Powered by Tanssi Network</p>
+            <p>Game Maker by Easesky</p>
+        </div>
+    </div>
+
+    <script>
+        // --- Game Setup ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        let canvasWidth = Math.min(800, window.innerWidth - 40);
+        let canvasHeight = 250;
+        canvas.width = canvasWidth;
+        canvas.height = canvasHeight;
+
+        // --- Game Variables ---
+        let gameState = 'start'; // 'start', 'playing', 'gameOver'
+        let score = 0;
+        let highScore = 0;
+        let gameSpeed = 5;
+        let gameSpeedIncrease = 0.001;
+        let frameCount = 0;
+
+        // --- Player (Forkie) ---
+        const player = {
+            x: 50,
+            y: canvasHeight - 50,
+            width: 30,
+            height: 50,
+            dy: 0, // velocity y
+            gravity: 0.7,
+            jumpPower: -15,
+            isJumping: false,
+            groundY: canvasHeight - 50,
+        };
+
+        // --- Obstacles ---
+        let obstacles = [];
+        let obstacleSpawnTimer = 0;
+        const initialSpawnRate = 100; // frames
+        let spawnRate = initialSpawnRate;
+
+        // --- Sound Effects using Tone.js ---
+        const synth = new Tone.Synth().toDestination();
+        const metalSynth = new Tone.MetalSynth({
+            frequency: 150,
+            envelope: { attack: 0.001, decay: 0.1, release: 0.01 },
+            harmonicity: 3.1,
+            modulationIndex: 16,
+            resonance: 2000,
+            octaves: 0.5
+        }).toDestination();
+        metalSynth.volume.value = -15;
+
+        function playJumpSound() {
+            // A quick, high-pitched sound for jumping
+            synth.triggerAttackRelease("G5", "32n");
+        }
+
+        function playGameOverSound() {
+            // A lower, dissonant sound for game over
+            metalSynth.triggerAttackRelease("C2", "8n", Tone.now());
+        }
+        
+        function playScoreSound() {
+             // A subtle sound for reaching a score milestone
+            synth.triggerAttackRelease("C6", "32n", Tone.now());
+        }
+
+        // --- Drawing Functions ---
+        function drawPlayer() {
+            ctx.save();
+            ctx.strokeStyle = '#2c3e50';
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            
+            const p = player;
+            const handleBottom = p.y + p.height;
+            const handleTop = p.y + p.height * 0.4;
+            const tineBase = handleTop;
+            const tineTop = p.y;
+            const tineWidth = p.width / 3;
+
+            // Handle
+            ctx.moveTo(p.x, handleBottom);
+            ctx.lineTo(p.x, handleTop);
+
+            // Base of tines
+            ctx.moveTo(p.x - p.width / 2, tineBase);
+            ctx.lineTo(p.x + p.width / 2, tineBase);
+
+            // Tines (4 tines)
+            ctx.moveTo(p.x - p.width / 2, tineBase);
+            ctx.lineTo(p.x - p.width / 2, tineTop);
+
+            ctx.moveTo(p.x - tineWidth / 2, tineBase);
+            ctx.lineTo(p.x - tineWidth / 2, tineTop);
+
+            ctx.moveTo(p.x + tineWidth / 2, tineBase);
+            ctx.lineTo(p.x + tineWidth / 2, tineTop);
+            
+            ctx.moveTo(p.x + p.width / 2, tineBase);
+            ctx.lineTo(p.x + p.width / 2, tineTop);
+            
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        function drawObstacles() {
+            obstacles.forEach(obs => {
+                ctx.fillStyle = '#c0392b'; // Obstacle color
+                ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
+            });
+        }
+
+        function drawScore() {
+            ctx.fillStyle = '#95a5a6';
+            ctx.font = "24px 'VT323'";
+            ctx.textAlign = 'right';
+            ctx.fillText(`HI ${String(highScore).padStart(5, '0')}`, canvas.width - 10, 30);
+            ctx.fillText(String(Math.floor(score)).padStart(5, '0'), canvas.width - 10, 55);
+        }
+
+        function drawStartScreen() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.font = "30px 'Press Start 2P'";
+            ctx.textAlign = 'center';
+            ctx.fillText('Press Space to Start', canvas.width / 2, canvas.height / 2 - 20);
+            ctx.font = "16px 'VT323'";
+            ctx.fillText('(or touch the screen)', canvas.width / 2, canvas.height / 2 + 10);
+        }
+
+        function drawGameOverScreen() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.font = "40px 'Press Start 2P'";
+            ctx.textAlign = 'center';
+            ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2 - 40);
+            
+            ctx.font = "20px 'VT323'";
+            ctx.fillText(`Your Score: ${Math.floor(score)}`, canvas.width / 2, canvas.height / 2);
+
+            ctx.font = "20px 'Press Start 2P'";
+            ctx.fillText('Restart?', canvas.width / 2, canvas.height / 2 + 50);
+        }
+
+
+        // --- Update Functions ---
+        function updatePlayer() {
+            if (player.isJumping) {
+                player.dy += player.gravity;
+                player.y += player.dy;
+            }
+
+            // Prevent falling through the ground
+            if (player.y >= player.groundY) {
+                player.y = player.groundY;
+                player.dy = 0;
+                player.isJumping = false;
+            }
+        }
+        
+        function updateObstacles() {
+            obstacleSpawnTimer++;
+            if (obstacleSpawnTimer > spawnRate) {
+                spawnObstacle();
+                obstacleSpawnTimer = 0;
+                // Make game harder over time by reducing spawn rate
+                spawnRate = initialSpawnRate - (gameSpeed * 5);
+                if(spawnRate < 40) spawnRate = 40;
+            }
+
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                const obs = obstacles[i];
+                obs.x -= gameSpeed;
+
+                if (obs.x + obs.width < 0) {
+                    // Remove obstacle if it's off-screen
+                    obstacles.splice(i, 1);
+                }
+            }
+        }
+        
+        function spawnObstacle() {
+            const obsHeight = Math.random() * 30 + 20; // Random height
+            const obsWidth = Math.random() * 15 + 15; // Random width
+            obstacles.push({
+                x: canvas.width,
+                y: canvas.height - obsHeight,
+                width: obsWidth,
+                height: obsHeight,
+            });
+        }
+        
+        function checkCollision() {
+            obstacles.forEach(obs => {
+                // Simple AABB collision detection
+                if (
+                    player.x < obs.x + obs.width &&
+                    player.x + player.width > obs.x &&
+                    player.y < obs.y + obs.height &&
+                    player.y + player.height > obs.y
+                ) {
+                    gameState = 'gameOver';
+                    if (Tone.context.state === 'running') {
+                        playGameOverSound();
+                    }
+                }
+            });
+        }
+        
+        // --- Game Loop ---
+        function gameLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (gameState === 'playing') {
+                frameCount++;
+                
+                // Update score and speed
+                score += 0.1 * (gameSpeed / 5);
+                const oldScoreMilestone = Math.floor((score - 0.1 * (gameSpeed / 5)) / 100);
+                const newScoreMilestone = Math.floor(score / 100);
+
+                if (newScoreMilestone > oldScoreMilestone) {
+                    playScoreSound();
+                }
+
+                gameSpeed += gameSpeedIncrease;
+
+                updatePlayer();
+                updateObstacles();
+                checkCollision();
+                
+                drawObstacles();
+                drawPlayer();
+            } else {
+                // Draw static elements when not playing
+                drawPlayer();
+                drawObstacles();
+                if(gameState === 'start') {
+                    drawStartScreen();
+                } else if(gameState === 'gameOver') {
+                    drawGameOverScreen();
+                }
+            }
+            
+            drawScore();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- Game Controls ---
+        function handleInput() {
+             // Resume audio context on first user interaction
+            if (Tone.context.state !== 'running') {
+                Tone.context.resume();
+            }
+
+            if (gameState === 'playing') {
+                if (!player.isJumping) {
+                    player.isJumping = true;
+                    player.dy = player.jumpPower;
+                    playJumpSound();
+                }
+            } else {
+                resetGame();
+                gameState = 'playing';
+            }
+        }
+
+        // --- Game Reset ---
+        function resetGame() {
+            if (score > highScore) {
+                highScore = Math.floor(score);
+            }
+            score = 0;
+            gameSpeed = 5;
+            obstacles = [];
+            player.y = player.groundY;
+            player.dy = 0;
+            obstacleSpawnTimer = 0;
+            spawnRate = initialSpawnRate;
+        }
+
+        // --- Event Listeners ---
+        window.addEventListener('keydown', e => {
+            if (e.code === 'Space') {
+                e.preventDefault();
+                handleInput();
+            }
+        });
+        
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            handleInput();
+        }, { passive: false });
+
+        window.addEventListener('resize', () => {
+            canvasWidth = Math.min(800, window.innerWidth - 40);
+            canvas.width = canvasWidth;
+        });
+
+        // --- Start the game ---
+        gameLoop();
+
+    </script>
+</body>
+</html>
